@@ -1,23 +1,43 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
+	"path"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox"
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/files"
+	"github.com/mitchellh/go-homedir"
+	"golang.org/x/oauth2"
 )
 
 const (
 	// Timeout we set to abort the process once we run in production mode
 	AbortTimeout = 15
+
+	// Dropbox App settings
+	AppKey    = "5a2z1ckyo1l2707"
+	AppSecret = "ylndu9qf2o4sj2c"
 )
 
 func main() {
+	// Determine default value for token storage.
+	dir, err := homedir.Dir()
+	if err != nil {
+		return
+	}
+	filePath := path.Join(dir, ".config", "dropbox-auto-cleaner", "auth.json")
+
+	tokenStorage := flag.String("token-storage", filePath, "Absolute file path to store the auth token. Example value: '/home/user/auth.json'.")
 	dropboxPath := flag.String("path", "", "Folder path to observe and clean. Example value: '/Apps/Netatmo/Your Name'. Required flag.")
 	tickerInterval := flag.String("interval", "24h", "Interval in when the cleaning operation should be triggered. Values from https://pkg.go.dev/time@go1.20.1#ParseDuration are supported. Example value: '24h'.")
 	fileAge := flag.String("file-age", "168h", "File age: Every file inside path that is older than this setting will be deleted. Values from https://pkg.go.dev/time@go1.20.1#ParseDuration are supported. Default: '168h' (aka 7 days).")
@@ -47,6 +67,12 @@ func main() {
 	log.Println("====================")
 	log.Println("Dropbox Cleaner")
 	log.Println("====================")
+
+	dropboxClient, err := initDropboxFileClient(*tokenStorage)
+	if err != nil {
+		log.Fatalf("Initialization of the Dropbox API client failed: %+v", err)
+	}
+
 	log.Println("Settings under we operate:")
 	log.Printf("* Cleaning path: '%s'", *dropboxPath)
 	log.Printf("* Every %s", *tickerInterval)
@@ -63,8 +89,6 @@ func main() {
 
 		time.Sleep(AbortTimeout * time.Second)
 	}
-
-	dropboxClient := initDropboxFileClient(dropboxAPIToken)
 
 	// Executing first run manually.
 	// First tick starts after the configured time has passed.
@@ -87,7 +111,6 @@ func main() {
 
 				log.Println("Dropbox Cleaning operation done")
 				log.Printf("Next interval ticket: %s", nextTick.Format(time.RFC1123))
-				// do stuff
 			case <-quitTicker:
 				log.Println("Signal received to shutdown ticker loop")
 				ticker.Stop()
@@ -110,16 +133,6 @@ func main() {
 
 	<-done
 	log.Println("Shutting down application")
-}
-
-func initDropboxFileClient(dropboxAPIToken string) files.Client {
-	config := dropbox.Config{
-		Token:    dropboxAPIToken,
-		LogLevel: dropbox.LogInfo,
-	}
-	dropboxClient := files.New(config)
-
-	return dropboxClient
 }
 
 func cleanupDropboxFolder(dropboxClient files.Client, dropboxPath string, fileAge time.Duration, dryRun bool) {
@@ -166,4 +179,88 @@ func cleanupDropboxFolder(dropboxClient files.Client, dropboxPath string, fileAg
 			// Right now, we don't need to take action, when this is a folder.
 		}
 	}
+}
+
+func oauthConfig() *oauth2.Config {
+	return &oauth2.Config{
+		ClientID:     AppKey,
+		ClientSecret: AppSecret,
+		Endpoint:     dropbox.OAuthEndpoint(""),
+	}
+}
+
+func readTokens(filePath string) (map[string]string, error) {
+	b, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	tokens := make(map[string]string)
+	if json.Unmarshal(b, &tokens) != nil {
+		return nil, err
+	}
+
+	return tokens, nil
+}
+
+func writeTokens(filePath string, tokens map[string]string) error {
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// Doesn't exist; lets create it
+		err = os.MkdirAll(filepath.Dir(filePath), 0700)
+		if err != nil {
+			return err
+		}
+	}
+
+	// At this point, file must exist. Lets (over)write it.
+	b, err := json.Marshal(tokens)
+	if err != nil {
+		return err
+	}
+	if err = ioutil.WriteFile(filePath, b, 0600); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func initDropboxFileClient(tokenStorage string) (files.Client, error) {
+	conf := oauthConfig()
+
+	tokenMap, err := readTokens(tokenStorage)
+	if tokenMap == nil {
+		tokenMap = make(map[string]string)
+	}
+
+	if err != nil || tokenMap["accessToken"] == "" {
+		fmt.Printf("1. Go to %v\n", conf.AuthCodeURL("state"))
+		fmt.Printf("2. Click \"Allow\" (you might have to log in first).\n")
+		fmt.Printf("3. Copy the authorization code.\n")
+		fmt.Printf("Enter the authorization code here: ")
+
+		var code string
+		if _, err = fmt.Scan(&code); err != nil {
+			return nil, fmt.Errorf("authorization code scan failed: %w", err)
+		}
+		var token *oauth2.Token
+		ctx := context.Background()
+		token, err = conf.Exchange(ctx, code)
+		if err != nil {
+			return nil, fmt.Errorf("authorization token exchange failed: %w", err)
+		}
+		tokenMap["accessToken"] = token.AccessToken
+		err = writeTokens(tokenStorage, tokenMap)
+		if err != nil {
+			return nil, fmt.Errorf("writing auth tokens to disk failed: %w", err)
+		}
+	}
+
+	config := dropbox.Config{
+		Token:    tokenMap["accessToken"],
+		LogLevel: dropbox.LogInfo,
+	}
+	dropboxClient := files.New(config)
+
+	return dropboxClient, nil
 }
