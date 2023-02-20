@@ -1,0 +1,61 @@
+name: Testing
+
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: "5 1 * * *"
+
+jobs:
+  testing:
+    name: Test- and linting
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+        with:
+          go-version: 1.20
+
+      # Caching go modules to speed up the run
+      - uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run go fmt
+        if: runner.os != 'Windows'
+        run: diff -u <(echo -n) <(gofmt -d -s .)
+
+      - name: Run go vet
+        run: make vet
+
+      - name: Run staticcheck
+        run: make staticcheck
+
+  compile:
+    name: Compile application
+    runs-on: ubuntu-20.04
+    needs: [testing]
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+        with:
+          go-version: 1.20
+
+      # Caching go modules to speed up the run
+      - uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build
+        run: make build
+
+  # Right now we don't build the Docker image.
+  # Compiling the application might be ok enough for now.
