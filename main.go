@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -190,7 +189,7 @@ func oauthConfig() *oauth2.Config {
 }
 
 func readTokens(filePath string) (map[string]string, error) {
-	b, err := ioutil.ReadFile(filePath)
+	b, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +217,7 @@ func writeTokens(filePath string, tokens map[string]string) error {
 	if err != nil {
 		return err
 	}
-	if err = ioutil.WriteFile(filePath, b, 0600); err != nil {
+	if err = os.WriteFile(filePath, b, 0600); err != nil {
 		return err
 	}
 
