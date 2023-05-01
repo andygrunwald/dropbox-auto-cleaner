@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.20.2-alpine3.16 AS build-env
+FROM golang:1.20.3-alpine3.16 AS build-env
 RUN apk --no-cache add build-base gcc
 ADD . /build
 WORKDIR /build
