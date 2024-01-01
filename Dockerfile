@@ -7,7 +7,7 @@ RUN make build
 
 
 # Final stage
-FROM alpine:3.18.4
+FROM alpine:3.19.0
 
 WORKDIR /app
 COPY --from=build-env /build/dropbox-auto-cleaner /app/
