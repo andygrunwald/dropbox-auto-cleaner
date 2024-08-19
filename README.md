@@ -32,6 +32,5 @@ build-docker                   Builds the docker image
 build                          Compiles the application
 help                           Outputs the help
 run                            Compiles and starts the application
-staticcheck                    Runs static code analyzer staticcheck
 vet                            Runs go vet
 ```

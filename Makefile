@@ -8,11 +8,6 @@ help: ## Outputs the help
 build: ## Compiles the application
 	go build -race -o dropbox-auto-cleaner
 
-.PHONY: staticcheck
-staticcheck: ## Runs static code analyzer staticcheck
-	go install honnef.co/go/tools/cmd/staticcheck@latest
-	staticcheck ./...
-
 .PHONY: vet
 vet: ## Runs go vet
 	go vet ./...
